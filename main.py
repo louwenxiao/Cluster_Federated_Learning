@@ -32,9 +32,9 @@ def main(dataset,get_data_way,model,batch_size,learning_rate,num_glob_iters,
     # 获得云模型，获得global_nums个用户，放在clients中
     clients = []
     for i in range(global_nums):
-        mid_user = client(id=i,model=m,device=device,dataset=data_loader.get_data(get_data_way=get_data_way),
+        mid_user = client(id=i,model=copy.deepcopy(m),device=device,dataset=data_loader.get_data(get_data_way=get_data_way),
                           learning_rate=learning_rate,optimizer=optimizer,local_epochs=local_epochs,server_id=0)
-        clients.append(copy.deepcopy(mid_user))
+        clients.append(mid_user)
         clients[i].pre_train(epoch=pre_epochs)
         print("---------------{}---------------".format(i))
 
@@ -43,9 +43,9 @@ def main(dataset,get_data_way,model,batch_size,learning_rate,num_glob_iters,
     print(clients_id)
     
     for i in range(k):
-        cloud = server(model=m,device=device, dataset=data_loader.get_data(get_data_way=get_data_way),
+        cloud = server(model=copy.deepcopy(m),device=device, dataset=data_loader.get_data(get_data_way=get_data_way),
                        clients_id=clients_id[i],server_id=i)
-        clouds.append(copy.deepcopy(cloud))
+        clouds.append(cloud)
         clouds[i].aggregate_model()
         for j in clients_id[i]:         # 更新用户所在簇
             clients[j].updata_clu(id=i)
