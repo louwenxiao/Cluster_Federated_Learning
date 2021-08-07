@@ -3,32 +3,36 @@ import random
 from torch.utils.data import DataLoader
 from torchvision import datasets
 from torchvision import transforms
-import numpy as np
-import struct
+from torch.utils.data import random_split
+import sys
 import time
-import gc
+import os
+import psutil
 
-# 获得数据，默认是MNIST数据集，同时还有CIFAR和EMNIST数据集
-# 获得IID数据，或者获得non-IID数据
-# 对于IID数据
+
+# 获得数据，默认是MNIST数据集，同时还有CIFAR、EMNIST、FMNIST数据集
+# 对于non-IID数据：每个用户随机获得两个标签
 class download_data(object):
-    def __init__(self, dataset_name='MNIST', batch_size=64):
-        self.data_name = dataset_name
-        self.batch_size = batch_size
+    def __init__(self, args):
+        self.args = args
+        self.data_name = args.dataset
+        self.batch_size = args.batch_size
+        self.get_data_way = args.get_data
         self.__load_dataset()         # 初始化直接调用函数
+        self.__initial()
+
 
     # 产生 self.train_dataset 和 self.test_dataset
     def __load_dataset(self):
         if self.data_name =='MNIST':
-            self.train_dataset = datasets.MNIST('./data/',
+            train_dataset = datasets.MNIST('./data/',
                                               train=True,
                                               download=True,
                                               transform=transforms.Compose([
                                                   transforms.ToTensor(),
                                                   transforms.Normalize((0.1307,), (0.3081,))
                                               ]))
-
-            self.test_dataset = datasets.MNIST('./data/',
+            test_dataset = datasets.MNIST('./data/',
                                              train=False,
                                              download=True,
                                              transform=transforms.Compose([
@@ -37,130 +41,180 @@ class download_data(object):
                                              ]))
 
         elif self.data_name == 'CIFAR10':
-            self.train_dataset = datasets.CIFAR10('./data/',
+            train_dataset = datasets.CIFAR10('./data/',
                                                   train=True,
                                                   download=True,
                                                   transform=transforms.Compose([
                                                       transforms.ToTensor(),
-                                                      transforms.Normalize((0.4914, 0.4822, 0.4465), (0.2023, 0.1994, 0.2010))
+                                                      transforms.Normalize((0.4914, 0.4822, 0.4465),
+                                                                           (0.2023, 0.1994, 0.2010))
                                                   ]))
-            self.test_dataset = datasets.CIFAR10('./data/',
+            test_dataset = datasets.CIFAR10('./data/',
                                                  train=False,
                                                  download=True,
                                                  transform=transforms.Compose([
                                                      transforms.ToTensor(),
-                                                     transforms.Normalize((0.4914, 0.4822, 0.4465), (0.2023, 0.1994, 0.2010))
+                                                     transforms.Normalize((0.4914, 0.4822, 0.4465),
+                                                                          (0.2023, 0.1994, 0.2010))
                                                  ]))
 
+        elif self.data_name == "FMNIST":
+            train_dataset = datasets.FashionMNIST('./data/',
+                                              train=True,
+                                              download=True,
+                                              transform=transforms.Compose([
+                                                  transforms.ToTensor(),
+                                                  transforms.Normalize((0.1307,), (0.3081,))
+                                              ]))
+            test_dataset = datasets.FashionMNIST('./data/',
+                                             train=False,
+                                             download=True,
+                                             transform=transforms.Compose([
+                                                 transforms.ToTensor(),
+                                                 transforms.Normalize((0.1307,), (0.3081,))
+                                             ]))
+
         elif self.data_name == 'EMNIST':
-            transform = transforms.Compose([transforms.ToTensor(),transforms.Normalize((0.1307,), (0.3081,))])
-
-            # 获得训练集,并且删除中间文件
-            train_dataset = []
-            train_data = './data/EMNIST/data/emnist-byclass-train-images-idx3-ubyte'
-            train_label = './data/EMNIST/data/emnist-byclass-train-labels-idx1-ubyte'
-            with open(train_label, 'rb') as lbpath:
-                magic, n = struct.unpack('>II', lbpath.read(8))
-                train_labels = np.fromfile(lbpath, dtype=np.uint8)
-            with open(train_data, 'rb') as imgpath:
-                magic, num, rows, cols = struct.unpack('>IIII', imgpath.read(16))
-                train_images = np.fromfile(imgpath, dtype=np.uint8).reshape(len(train_labels), 784)
-            for i, j in zip(train_images, train_labels):
-                images = np.reshape(i, [28, 28])
-                train_dataset.append((transform(images), j))
-
-            sampling = random.sample(range(0,len(train_dataset)),int(0.2*len(train_dataset)))
-            self.train_dataset = torch.utils.data.Subset(train_dataset,sampling)
-            del train_images,train_labels,train_dataset,sampling
-            gc.collect()
-
-            # 获得测试集,并且删除中间文件
-            test_dataset = []
-            test_data = './data/EMNIST/data/emnist-byclass-test-images-idx3-ubyte'
-            test_label = './data/EMNIST/data/emnist-byclass-test-labels-idx1-ubyte'
-            with open(test_label, 'rb') as lbpath:
-                magic, n = struct.unpack('>II', lbpath.read(8))
-                test_labels = np.fromfile(lbpath, dtype=np.uint8)
-            with open(test_data, 'rb') as imgpath:
-                magic, num, rows, cols = struct.unpack('>IIII', imgpath.read(16))
-                test_images = np.fromfile(imgpath, dtype=np.uint8).reshape(len(test_labels), 784)
-            for i, j in zip(test_images, test_labels):
-                images = np.reshape(i, [28, 28])
-                test_dataset.append((transform(images), j))
-
-            sampling = random.sample(range(0,len(test_dataset)),int(0.2*len(test_dataset)))
-            self.test_dataset = torch.utils.data.Subset(test_dataset,sampling)
-            del test_images,test_labels,sampling,test_dataset
-            gc.collect()
+            train_dataset = datasets.EMNIST('./data/',
+                                            split="byclass",
+                                            train=True,
+                                            download=True,
+                                            transform=transforms.Compose([
+                                                transforms.ToTensor(),
+                                                transforms.Normalize((0.1307,), (0.3081,))
+                                            ]))
+            test_dataset = datasets.EMNIST('./data/',
+                                            split="byclass",
+                                            train=False,
+                                            download=True,
+                                            transform=transforms.Compose([
+                                                transforms.ToTensor(),
+                                                transforms.Normalize((0.1307,), (0.3081,))
+                                            ]))
 
         else:
             raise RuntimeError('the name inputed is wrong!')
-        
-        # sampling_train = random.sample(range(0,len(self.train_dataset)),int(0.5*len(self.train_dataset)))
-        # self.train_dataset = torch.utils.data.Subset(self.train_dataset, sampling_train)
-        # sampling_test = random.sample(range(0,len(self.test_dataset)), int(0.5*len(self.test_dataset)))
-        # self.test_dataset = torch.utils.data.Subset(self.test_dataset, sampling_test)
 
+        self.train_dataset = list(train_dataset)
+        self.test_dataset = list(test_dataset)
+        # self.train_dataset = train_dataset
+        # self.test_dataset = test_dataset
 
-    # 获得IID数据，每个用户样本数量为 train_num=16000,test_num=3200
+    # 初始化
+    def __initial(self):
+        if self.get_data_way == "IID":      # 获得IID数据：用户平分数据集
+            num = int(len(self.train_dataset)/self.args.global_nums)
+            train_split = [num for i in range(self.args.global_nums)]
+            train_split.append(len(self.train_dataset)-self.args.global_nums*num)
+            
+            num = int(len(self.test_dataset)/self.args.global_nums)
+            test_split = [num for i in range(self.args.global_nums)]
+            test_split.append(len(self.test_dataset)-self.args.global_nums*num)
+
+            train_dataset = random_split(self.train_dataset,train_split)
+            test_dataset = random_split(self.test_dataset,test_split)
+            train_dataset = [DataLoader(train_dataset[i], batch_size=self.batch_size, shuffle=True,
+                                        pin_memory=True) for i in range(self.args.global_nums)]
+            test_dataset = [DataLoader(test_dataset[i], batch_size=self.batch_size, shuffle=True,
+                                        pin_memory=True) for i in range(self.args.global_nums)]
+            
+            self.data = list(zip(train_dataset,test_dataset))
+            self.num = -1                # 记录所在位置
+            print(sys.getsizeof(self.train_dataset[0][0]),sys.getsizeof(self.train_dataset[0][1]))
+
+        elif self.get_data_way == "nonIID":
+            if self.data_name == 'EMNIST':
+                self.index_train = [[] for i in range(0,62)]
+                self.index_test = [[] for i in range(0,62)]
+            else:
+                self.index_train = [[] for i in range(0,10)]
+                self.index_test = [[] for i in range(0,10)]
+
+            for i, data in enumerate(self.train_dataset):
+                self.index_train[data[1]].append(i)           # 按照标签分类
+            for i, data in enumerate(self.test_dataset):
+                self.index_test[data[1]].append(i)           # 按照标签分类
+
+            self.indexes = []
+
+        else:
+            self.index_train = [[],[],[]]       # 将数据集分成3个不相交的集合
+            self.index_test = [[],[],[]]
+
+            if self.data_name == 'EMNIST':
+                for i, data in enumerate(self.train_dataset):
+                    if data[1] < 10:
+                        self.index_train[0].append(i)
+                    elif data[1] > 35:
+                        self.index_train[2].append(i)
+                    else:
+                        self.index_train[1].append(i)
+                for i, data in enumerate(self.test_dataset):
+                    if data[1] < 10:
+                        self.index_test[0].append(i)
+                    elif data[1] > 35:
+                        self.index_test[2].append(i)
+                    else:
+                        self.index_test[1].append(i)
+
+            else:
+                for i, data in enumerate(self.train_dataset):
+                    if data[1] < 3:
+                        self.index_train[0].append(i)
+                    elif data[1] > 5:
+                        self.index_train[2].append(i)
+                    else:
+                        self.index_train[1].append(i)
+                for i, data in enumerate(self.test_dataset):
+                    if data[1] < 3:
+                        self.index_test[0].append(i)
+                    elif data[1] > 5:
+                        self.index_test[2].append(i)
+                    else:
+                        self.index_test[1].append(i)
+
+    # 获得IID数据，用户平分数据集
     # 每个用户具有相同的样本数量，相同的标签
-    def get_IID_data(self,train_num=1,test_num=1):   # 设置训练样本比例
-        if self.data_name == "EMNIST":
-            train_num = 0.1
-            test_num = 0.1
+    def get_IID_data(self):   # 设置训练样本比例
 
-        # sampling_train = random.sample(range(0,len(self.train_dataset)),int(train_num*len(self.train_dataset)))
-        # train_dataset = torch.utils.data.Subset(self.train_dataset, sampling_train)
-        train_dataset = DataLoader(self.train_dataset, batch_size=self.batch_size, shuffle=True,num_workers=8,pin_memory=True)
-
-        # sampling_test = random.sample(range(0,len(self.test_dataset)), int(test_num*len(self.test_dataset)))
-        # test_dataset = torch.utils.data.Subset(self.test_dataset, sampling_test)
-        test_dataset = DataLoader(self.test_dataset, batch_size=self.batch_size, shuffle=True,num_workers=8,pin_memory=True)
-
-        data = []
-        data.append(train_dataset)
-        data.append(test_dataset)
-        return data
+        self.num = self.num + 1
+        return self.data[self.num]
 
 
     # 获得non-IID数据，每个用户仅仅包含两个标签,需要考虑三种数据集的不同
     # 一个是0-10，另一个是10个字符串，还有一个是62个标签
-    def get_nonIID_data(self,train_num=1,test_num=1):
+    def get_nonIID_data(self):
         if self.data_name == "EMNIST":
-            train_num = 0.2
-            test_num = 0.2
-
-        label = []   # 存放选中的标签
-        dataset_indices = []
-        testdata_indices = []
-        if (self.data_name == 'MNIST') or (self.data_name == 'CIFAR10'):
-            rank = random.sample(range(0, 10), 2)
-            #indices = [[] for i in range(10)]
+            num = 62
         else:
-            rank = random.sample(range(0,62),2)    # EMNIST数据集，有62个标签
-            #indices = [[] for i in range(62)]
-
-        # 按照数据的标签划分成10组，每个组存放相应的索引
-        for index, data in enumerate(self.train_dataset):
-            if data[1] in rank:
-                dataset_indices.append(index)
-
-        for index, data in enumerate(self.test_dataset):
-            if data[1] in rank:
-                testdata_indices.append(index)
-            # if data[1] not in label:      # 标签不存在，分配一个标签，以及一个编号
-            #     label.append(data[1])
-            #     indices[i].append(index)
-            #     i = i + 1
-            # else:
-            #     l = label.index(data[1])  # 标签存在，在相应的indices中添加新的索引
-            #     indices[l].append(index)
-
+            num = 10
+        rank = random.sample(range(0,num),2)
+        indexes = [i for i in range(num) if i not in self.indexes]      # 不存在标签
+        if len(indexes) != 0:
+            if rank[0] not in indexes:
+                rank[1] = indexes[0]
         print(rank)
-        dataset1 = torch.utils.data.Subset(self.train_dataset, dataset_indices)    # 获取指定元素的数据集
-        dataset2 = torch.utils.data.Subset(self.test_dataset, testdata_indices)    # 获取指定元素的数据集
-        train_dataset = DataLoader(dataset1, batch_size=self.batch_size, shuffle=True,num_workers=8,pin_memory=True)
-        test_dataset = DataLoader(dataset2, batch_size=self.batch_size, shuffle=True,num_workers=8,pin_memory=True)
+
+        for i in rank:
+            if i not in self.indexes:
+                self.indexes.append(i)
+        self.indexes.sort()
+        print(self.indexes)
+        time.sleep(2)
+
+        train_index = []
+        test_index = []
+        for i in rank:
+            train_index.extend(self.index_train[i])
+            test_index.extend(self.index_test[i])
+
+        sample_train = random.sample(train_index,int(len(train_index)*0.5))
+        sample_test = random.sample(test_index,int(len(test_index)*0.5))
+
+        dataset1 = torch.utils.data.Subset(self.train_dataset, sample_train)    # 获取指定元素的数据集
+        dataset2 = torch.utils.data.Subset(self.test_dataset, sample_test)    # 获取指定元素的数据集
+        train_dataset = DataLoader(dataset1, batch_size=self.batch_size, shuffle=True)
+        test_dataset = DataLoader(dataset2, batch_size=self.batch_size, shuffle=True)
 
         data = []
         data.append(train_dataset)
@@ -170,78 +224,34 @@ class download_data(object):
 
     # 获得practical_nonIID_data，这个更加符合实际
     # 将所有的数据分为三个组，每个组内的数据不完全一样。
-    # 每个组具有80%的重要数据，20%的其他数据
-    def get_practical_nonIID_data(self,train_num=0.02,test_num=1):
-        mnist_label = [[0,1,2],[3,4,5],[6,7,8,9]]
-        cifar_label = [[0,1,2],[3,4,5],[6,7,8,9]]
-        emnist_label = [[0,1,2,3,4,5,6,7,8,9],         # 数字集合，大写字母集合，小写字母集合
-                        [10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25,26,27,28,29,30,31,32,33,34,35],
-                        [36,37,38,39,40,41,42,43,44,45,46,47,48,49,50,51,52,53,54,55,56,57,58,59,60,61]]
+    # 每个组具有90%的主要数据，10%的其他数据
+    # data_num表示选用那个数据集作为主要数据
+    def get_practical_nonIID_data(self,data_num=0):
+        print(data_num)
+        train_data_num = random.randint(5000,20000)      # 训练集大小
+        sampling_train = random.sample(self.index_train[data_num],train_data_num)
+        other1 = []
+        for i in range(3):
+            if i != data_num:
+                other1.extend(self.index_train[i])
+        other1 = random.sample(other1,int(train_data_num*0.1))
+        sampling_train.extend(other1)
 
-        data_indices = [[],[],[]]
-        test_indices = [[],[],[]]
-        if self.data_name == 'MNIST':              # 对三个数据集分别划分,每个数据集划分成三组
+        dataset = torch.utils.data.Subset(self.train_dataset, sampling_train)
+        train_dataset = DataLoader(dataset, batch_size=self.batch_size, shuffle=True)
 
-            for indix,data in enumerate(self.train_dataset):
-                if data[1] in mnist_label[0]:
-                    data_indices[0].append(indix)
-                elif data[1] in mnist_label[1]:
-                    data_indices[1].append(indix)
-                else:
-                    data_indices[2].append(indix)
-            for indix,data in enumerate(self.test_dataset):
-                if data[1] in mnist_label[0]:
-                    test_indices[0].append(indix)
-                elif data[1] in mnist_label[1]:
-                    test_indices[1].append(indix)
-                else:
-                    test_indices[2].append(indix)
 
-        elif self.data_name == 'CIFAR10':
+        test_data_num = int(train_data_num*0.2)      # 测试集大小
+        sampling_test = random.sample(self.index_test[data_num],test_data_num)
+        other1 = []
+        for i in range(3):
+            if i != data_num:
+                other1.extend(self.index_test[i])
+        other1 = random.sample(other1,int(test_data_num*0.1))
+        sampling_test.extend(other1)
 
-            for indix,data in enumerate(self.train_dataset):
-                if data[1] in cifar_label[0]:
-                    data_indices[0].append(indix)
-                elif data[1] in cifar_label[1]:
-                    data_indices[1].append(indix)
-                else:
-                    data_indices[2].append(indix)
-
-            for indix,data in enumerate(self.test_dataset):
-                if data[1] in cifar_label[0]:
-                    test_indices[0].append(indix)
-                elif data[1] in cifar_label[1]:
-                    test_indices[1].append(indix)
-                else:
-                    test_indices[2].append(indix)
-
-        else:
-
-            for indix,data in enumerate(self.train_dataset):
-                if data[1] in emnist_label[0]:
-                    data_indices[0].append(indix)
-                elif data[1] in emnist_label[1]:
-                    data_indices[1].append(indix)
-                else:
-                    data_indices[2].append(indix)
-            for indix,data in enumerate(self.test_dataset):
-                if data[1] in emnist_label[0]:
-                    test_indices[0].append(indix)
-                elif data[1] in emnist_label[1]:
-                    test_indices[1].append(indix)
-                else:
-                    test_indices[2].append(indix)
-
-        indices = random.randint(0,30002)       # 随机选择一组作为主要成分
-        indices = (indices%99)%3
-        #sampling_train = random.sample(range(0, len(self.train_dataset)), int(len(self.train_dataset)*train_num))
-        #sampling_train = list(set(np.append(sampling_train,data_indices[indices])))    # 合并 并且去重复值
-        dataset = torch.utils.data.Subset(self.train_dataset, data_indices[indices])
-        train_dataset = DataLoader(dataset, batch_size=self.batch_size, shuffle=True,num_workers=8,pin_memory=True)
-
-        #sampling_test = random.sample(range(0, len(self.test_dataset)), int(test_num * len(self.test_dataset)))
-        test_dataset = torch.utils.data.Subset(self.test_dataset, test_indices[indices])
-        test_dataset = DataLoader(test_dataset, batch_size=self.batch_size, shuffle=True,num_workers=8,pin_memory=True)
+        test_dataset = torch.utils.data.Subset(self.test_dataset, sampling_test)
+        test_dataset = DataLoader(test_dataset, batch_size=self.batch_size, shuffle=True)
         
         data = []
         data.append(train_dataset)
@@ -251,12 +261,16 @@ class download_data(object):
 
     # 第一种方式：IID；第二种获得数据的方式：每个用户随机获得2个标签，成为nonIID；
     # 第三种获得数据的方式，将数据划分为三组，每一组的用户数据相似，组之间数据相似小
-    def get_data(self,get_data_way):
-        if get_data_way == "IID":
+    def get_data(self,data_num=0,get_data="train"):
+        if get_data == "test":      # 如果仅仅得到测试数据，这样获得
+            data = DataLoader(self.test_dataset,batch_size=self.batch_size,shuffle=True)
+            return data
+
+        if self.get_data_way == "IID":
             data = self.get_IID_data()
-        elif get_data_way == "nonIID":
+        elif self.get_data_way == "nonIID":
             data = self.get_nonIID_data()
         else:  # 划分三组，每一组内的数据相似，组间不相似
-            data = self.get_practical_nonIID_data()
+            data = self.get_practical_nonIID_data(data_num)
 
         return data
