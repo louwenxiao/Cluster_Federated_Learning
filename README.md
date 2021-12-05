@@ -4,7 +4,8 @@
 
 	本人硕士一年级在读，专注于边缘计算方向，目前主要关注联邦学习的内容。在解决数据的non-IID过程中，有一个想法，并且用代码做了一个小实验。
 	想法：现实世界中，non-IID非常普遍，但是也不是完全非独立同分布的，因为物以类聚人以群分。那么我们能不能用聚类的方法进行学习？将每一个设备上训练的参数上传后，首先进行聚类，将相似的设备分为一类。划分一个个簇以后，每一个簇内进行联邦学习。
-	当然，利用聚类的方法解决non-IID问题的论文也有，但是基本都是每次聚合的时候分类，这样每次聚合都用聚类算法代价太高。所以我们希望可以先划分一个个簇，每一个簇内部单独训练。An Efficient Framework for Clustered Federated Learning.（NIPS2020）；ON THE BYZANTINE ROBUSTNESS OF CLUSTERED FEDERATED LEARNING
+	当然，利用聚类的方法解决non-IID问题的论文也有，如：An Efficient Framework for Clustered Federated Learning.（NIPS2020）；ON THE BYZANTINE ROBUSTNESS OF CLUSTERED FEDERATED LEARNING。但是存在问题：1.高昂的计算开销和通信开销，每次传输所有的簇模型、通过计算在本地数据的损失确定簇，2.簇个数已知，但是现实世界往往很难确定簇个数，3.簇内相对孤立，无法考虑其他簇模型对自己的影响等。为了解决上述问题，我们提出动态簇连邦学习，通过动态确定簇个数，同时学习其他簇知识，提高在non-IID上得性能。
+	
 
 ## 2.文件结构
 + cache  :   存放产生的模型文件
@@ -16,7 +17,7 @@
     + cluster.py   :  聚类算法
     + server.py    :  产生云服务
 
-+ data  :   下载相应的数据集
++ data  :   存放下载相应的数据集
 
 + data_and_model   
 
