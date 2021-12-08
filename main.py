@@ -1,145 +1,176 @@
-from data_and_model.models import get_model
+from data_and_model.models import get_model         # 调用自己定义的模块
 from data_and_model.datasets import download_data
-from clients_and_server.server import server
-from clients_and_server.clients import client
-from clients_and_server.cluster import K_means_cluster
-from plot import plot_acc
+from data_and_model.parameter import param
+from clients_and_server.server import get_server
+from clients_and_server.clients import get_client
+from clients_and_server.cluster import Kmeans, Kmeans_plusplus
+from plot import plot_acc,plot_loss
+
+# from torch.utils.tensorboard import SummaryWriter
+# from torch.utils.data import DataLoader
+
 import copy
 import torch
 import argparse
+import time
+import sys
 import os
-# import time
-# from torch import nn
-# import torch.multiprocessing as mp
-# from multiprocessing import Process          # 导入多进程中的进程池
-# from torch.autograd import Variable
+import psutil
 
 
-def main(dataset,get_data_way,model,batch_size,learning_rate,num_glob_iters,
-         local_epochs,optimizer,global_nums,gpu,k,pre_epochs):
+def main(para):
+    args = copy.deepcopy(para)
 
-    print('Initialize Dataset...')
-    data_loader = download_data(dataset_name=dataset, batch_size=batch_size)
-    # 全局模型的测试用数据，使用全部的测试数据
-    test_data = data_loader.get_data(get_data_way='IID')[1]
-    # 第一种方式：IID；第二种获得数据的方式：每个用户随机获得2个标签，成为nonIID；
-    # 第三种获得数据的方式，将数据划分为三组，每一组的用户数据相似，组之间数据非常不相似
+    print('Download and Initialize Dataset...')
+    data_loader = download_data(args=args)
 
-    m = get_model(dataset=dataset,model=model)
-    #mp.set_start_method('spawn')
-    device = torch.device("cuda:{}".format(gpu) if torch.cuda.is_available() and gpu != -1 else "cpu")
+    device = torch.device("cuda:{}".format(args.gpu) if torch.cuda.is_available() and args.gpu != -1 else "cpu")
+    model = get_model(dataset=args.dataset,model_name=args.model_name)
 
-    # 获得云模型，获得global_nums个用户，放在clients中
     clients = []
-    for i in range(global_nums):
-        mid_user = client(id=i,model=copy.deepcopy(m),device=device,dataset=data_loader.get_data(get_data_way=get_data_way),
-                          learning_rate=learning_rate,optimizer=optimizer,local_epochs=local_epochs,server_id=0)
-        clients.append(mid_user)
-        clients[i].pre_train(epoch=pre_epochs)
-        print("---------------{}---------------".format(i))
+    for i in range(args.global_nums):
+        data = data_loader.get_data()
+        user = get_client(id=i,model=copy.deepcopy(model),device=device,dataset=data,args=args)
+        clients.append(user)
+        # print("Client:{} initialization is complete".format(i))
 
-    clouds = []
-    clients_id = K_means_cluster(n_clients=global_nums,k_means=k)
+    print(u'当前进程的内存使用：%.4f GB' % (psutil.Process(os.getpid()).memory_info().rss / 1024 / 1024 / 1024) )
+    info = psutil.virtual_memory()
+    print(info)
+
+
+    # create server
+    server = get_server(model=copy.deepcopy(model),device=device,clients=clients,args=args)
+
+    print("预训练开始......")
+    for client in clients:
+        client.pre_train()     # 模型预训练，保存模型梯度到本地
+    print("预训练结束......")
+    clients_id = Kmeans_plusplus(n_clients=args.global_nums,device=device,epoch='N') # 使用kmeans++进行聚类
     print(clients_id)
-    
-    for i in range(k):
-        cloud = server(model=copy.deepcopy(m),device=device, dataset=data_loader.get_data(get_data_way=get_data_way),
-                       clients_id=clients_id[i],server_id=i)
-        clouds.append(cloud)
-        clouds[i].aggregate_model()
-        for j in clients_id[i]:         # 更新用户所在簇
-            clients[j].updata_clu(id=i)
-            clients[j].get_cluster_modal()
+    # sys.exit()
 
-    accuracyes = [[],[],[]]
-    s = server(model=m,device=device, dataset=data_loader.get_data(get_data_way="IID"),
-                       clients_id=range(k),server_id=10)    
-    s.aggregate_cluster()
-    # server_id=10 没有任何意义，纯粹为了填写一个参数而已
-    for epoch in range(num_glob_iters):
-        print("\n第{}轮：".format(epoch))
-        accuracyes[0].append(0)             # 第一个元素为每个用户的平均精度
-        accuracyes[1].append(0)             # 第二个为簇模型本地数据
-        accuracyes[2].append(0)             # 第三个全局模型全部数据
+    losses = []             # 存放精度和损失
+    accuracyes = []
+    for epoch in range(args.mid_epoch):
+        print("\nepoch：{}".format(epoch+1))
 
-        # 将全局模型送给每一个用户。
-        for j in range(global_nums):        
-            clients[j].get_model()
+        t1 = time.time()
+        for client in clients:  
+            client.local_train()        # 用户进行本地训练
+        # if epoch%20 == 0:
+        #     _ = Kmeans_plusplus(n_clients=args.global_nums,device=device,epoch=epoch)
+        #     print("sleep 10s ....")
+        #     time.sleep(10)
+        t2 = time.time()
+        print("用户训练：",t2-t1)
 
-        # 簇内部聚合,L 表示簇内部训练次数
-        L = 1
-        for clu in range(k):
+        server.get_cluster_model(clients_id)    # 簇内模型聚合
+        t3 = time.time()
+        print("簇聚合：",t3-t2)
 
-            for i in range(L):          
-                for cli in clients_id[clu]:         
-                    clients[cli].local_train()
-                    _,acc = clients[cli].test_model()
-                    accuracyes[0][epoch] += acc
-                    print("num{}:".format(cli),acc)
-                    
-                clouds[clu].aggregate_model()   # 簇内部模型聚合
+        server.get_global_model()
+        for client in clients:
+            client.get_global_model()
+        t4 = time.time()
+        print("聚合全局模型：",t4-t3)
 
-                for cli in clients_id[clu]:     # 将模型送给用户
-                    clients[cli].get_cluster_modal()
-        accuracyes[0][epoch] = accuracyes[0][epoch]/(L*global_nums)
+        accuracyes.append(0)
+        losses.append(0)
+        loss, acc = 0,0
+        for client_num in range(args.global_nums):     # 测试簇模型
+            loss,acc = clients[client_num].test_model()
+            accuracyes[epoch] = accuracyes[epoch] + acc
+            losses[epoch] = losses[epoch] + loss
+        accuracyes[epoch] = accuracyes[epoch] / args.global_nums
+        t5 = time.time()
 
-        for j in range(global_nums):            # 获得这个簇在所有本地用户数据上的精度
-            _,acc = clients[j].test_model()
-            accuracyes[1][epoch] += acc
-        accuracyes[1][epoch] = accuracyes[1][epoch]/global_nums  
+        # writer.add_scalar('acc', acc, epoch)
+        # writer.add_scalar('loss',loss, epoch)
+        
 
-        s.aggregate_cluster()                   # 聚合所有簇的模型
-        accuracyes[2][epoch] = s.gain_acc()
-        print(accuracyes[0][epoch],accuracyes[1][epoch],accuracyes[2][epoch])      
+        print("测试时间：",t5-t4)
 
-    plot_acc(accuracyes,get_data_way,)
+        print("精度：",accuracyes[epoch])
+        print("损失：",losses[epoch])
+    # sys.exit()
+
+    # 簇内部单独计算，不再计算全局模型
+    for epoch in range(args.mid_epoch,args.epoch):
+        print("\nepoch：{}".format(epoch+1))
+
+        for client in clients:  
+            client.local_train()        # 用户进行本地训练
+
+        server.get_cluster_model(clients_id)    # 簇内模型聚合
+
+        for client in clients:
+            client.get_cluster_model(clients_id)
+
+        # server.client_get_model(clients_id)
+
+        accuracyes.append(0)
+        losses.append(0)
+        loss, acc = 0, 0
+        for cli in range(args.global_nums):     # 测试簇模型
+            loss,acc = clients[cli].test_model()
+            accuracyes[epoch] = accuracyes[epoch] + acc
+            losses[epoch] = losses[epoch] + loss
+        accuracyes[epoch] = accuracyes[epoch] / args.global_nums
+
+        print("精度：",accuracyes[epoch])
+        print("损失：",losses[epoch])
+        # writer.add_scalar('acc' + str(args.idx), acc, epoch)
+        # writer.add_scalar('loss' + str(args.idx),loss, epoch)
+
+    plot_acc(accuracyes,args.get_data,args.dataset)
+    plot_loss(losses, args.get_data, args.dataset)
+
 
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("--dataset", type=str, default="MNIST", choices=["MNIST", "CIFAR10", "EMNIST"])
+    parser.add_argument("--dataset", type=str, default="MNIST", choices=["MNIST", "CIFAR10", "EMNIST","FMNIST"])
     parser.add_argument("--get_data", type=str, default="practical_nonIID", choices=["IID","nonIID","practical_nonIID"])
-    parser.add_argument("--model", type=str, default="CNN", choices=["CNN", "DNN", "MCLR_Logistic"])
+    parser.add_argument("--model_name", type=str, default="CNN", choices=["CNN","MCLR","RNN","ResNet18"])
     parser.add_argument("--batch_size", type=int, default=256)
-    parser.add_argument("--learning_rate", type=float, default=0.005, help="Local learning rate")
-    parser.add_argument("--num_global_iters", type=int, default=100,help="global train epoch")
+    parser.add_argument("--lr", type=float, default=0.01,help="Local learning rate" )
+    parser.add_argument("--gamma", type=float, default=0.98, choices=[1, 0.98, 0.99])
+    parser.add_argument("--momentum", type=float, default=0.9)
+    parser.add_argument("--epoch", type=int, default=200,help="global train epoch")
+    parser.add_argument("--mid_epoch", type=int, default=100,help="change way")
     parser.add_argument("--local_epochs", type=int, default=1)
     parser.add_argument("--optimizer", type=str, default="SGD")
     parser.add_argument("--global_nums", type=int, default=30, help="Number of all Users")
-    parser.add_argument("--gpu", type=int, default=1, help="Which GPU to run,-1 mean CPU, 0,1,2 for GPU")
+    parser.add_argument("--gpu", type=int, default=-1, help="Which GPU to run,-1 mean CPU, 0,1,2 for GPU")
     parser.add_argument("--k", type=int, default=3, help="Number of all clusters")
     parser.add_argument("--pre_epochs", type=int, default=1, help="number of pre epochs")
     args = parser.parse_args()
-
-    print("=" * 80)  
-    print("Summary of training process:")
-    print("Dataset: {}".format(args.dataset))        # default="MNIST", choices=["MNIST", "CIFAR10", "EMNIST"]
-    print("Get data way: {}".format(args.get_data))  # default="IID", choices=["IID","nonIID","practical_nonIID"]
-    print("Local Model: {}".format(args.model))      # default="CNN", choices=["CNN", "DNN", "MCLR_Logistic"]
-    print("Batch size: {}".format(args.batch_size))  # default=20
-    print("Learing rate: {}".format(args.learning_rate))  # default=0.01, help="Local learning rate"
-    print("Number of global rounds: {}".format(args.num_global_iters))    # default=800
-    print("Number of local rounds: {}".format(args.local_epochs))         # default=30
-    print("Optimizer: {}".format(args.optimizer))                         # default="SGD"
-    print("All users: {}".format(args.global_nums))     # default=100, help="Number of all Users"
-    print("=" * 80)
     
-    main(dataset=args.dataset,
-            get_data_way=args.get_data,
-            model=args.model,
-            batch_size=args.batch_size,
-            learning_rate=args.learning_rate,
-            num_glob_iters=args.num_global_iters,
-            local_epochs=args.local_epochs,
-            optimizer=args.optimizer,
-            global_nums=args.global_nums,
-            gpu=args.gpu,
-            k=args.k,
-            pre_epochs=args.pre_epochs)
+    
+    for x in ["MNIST"]:
+        way = ["IID"]
+            
+        for y in way:
+            args.dataset,args.get_data = x,y
+            args.mid_epoch,args.epoch,args.lr,args.gamma = param(x,y)
 
-    # 清除模型，保留结果
-    # for i in range(args.global_nums):
-    #     os.remove('./cache/model_state_{}.pt'.format(i))
-    # for i in range(args.k):
-    #     os.remove('./cache/global_model_{}.pt'.format(i))
-    # os.remove('./cache/global_model.pt')
+            print("=" * 80)  
+            print("Summary of training process:")
+            print("Dataset: {}".format(args.dataset))        # default="MNIST", choices=["MNIST", "CIFAR10", "EMNIST"]
+            print("Get data way: {}".format(args.get_data))  # default="IID", choices=["IID","nonIID","practical_nonIID"]
+            print("Model_name: {}".format(args.model_name))
+            print("Batch size: {}".format(args.batch_size))  # default=20
+            print("Learing rate: {}".format(args.lr))  # default=0.01, help="Local learning rate"
+            print("gamma: {}".format(args.gamma))
+            print("Momentum: {}".format(args.momentum))
+            print("epoch: {}".format(args.epoch))
+            print("mid_epoch: {}".format(args.mid_epoch))
+            print("Number of local rounds: {}".format(args.local_epochs))
+            print("Optimizer: {}".format(args.optimizer))  # default="SGD"
+            print("All users: {}".format(args.global_nums))     # default=100, help="Number of all Users"
+            print("=" * 80)
+            
+            main(args)
+
+
