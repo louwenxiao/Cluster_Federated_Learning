@@ -147,30 +147,23 @@ if __name__ == "__main__":
     parser.add_argument("--pre_epochs", type=int, default=1, help="number of pre epochs")
     args = parser.parse_args()
     
-    
-    for x in ["MNIST"]:
-        way = ["IID"]
-            
-        for y in way:
-            args.dataset,args.get_data = x,y
-            args.mid_epoch,args.epoch,args.lr,args.gamma = param(x,y)
 
-            print("=" * 80)  
-            print("Summary of training process:")
-            print("Dataset: {}".format(args.dataset))        # default="MNIST", choices=["MNIST", "CIFAR10", "EMNIST"]
-            print("Get data way: {}".format(args.get_data))  # default="IID", choices=["IID","nonIID","practical_nonIID"]
-            print("Model_name: {}".format(args.model_name))
-            print("Batch size: {}".format(args.batch_size))  # default=20
-            print("Learing rate: {}".format(args.lr))  # default=0.01, help="Local learning rate"
-            print("gamma: {}".format(args.gamma))
-            print("Momentum: {}".format(args.momentum))
-            print("epoch: {}".format(args.epoch))
-            print("mid_epoch: {}".format(args.mid_epoch))
-            print("Number of local rounds: {}".format(args.local_epochs))
-            print("Optimizer: {}".format(args.optimizer))  # default="SGD"
-            print("All users: {}".format(args.global_nums))     # default=100, help="Number of all Users"
-            print("=" * 80)
-            
-            main(args)
+    print("=" * 80)  
+    print("Summary of training process:")
+    print("Dataset: {}".format(args.dataset))        # default="MNIST", choices=["MNIST", "CIFAR10", "EMNIST"]
+    print("Get data way: {}".format(args.get_data))  # default="IID", choices=["IID","nonIID","practical_nonIID"]
+    print("Model_name: {}".format(args.model_name))
+    print("Batch size: {}".format(args.batch_size))  # default=20
+    print("Learing rate: {}".format(args.lr))  # default=0.01, help="Local learning rate"
+    print("gamma: {}".format(args.gamma))
+    print("Momentum: {}".format(args.momentum))
+    print("epoch: {}".format(args.epoch))
+    print("mid_epoch: {}".format(args.mid_epoch))
+    print("Number of local rounds: {}".format(args.local_epochs))
+    print("Optimizer: {}".format(args.optimizer))  # default="SGD"
+    print("All users: {}".format(args.global_nums))     # default=100, help="Number of all Users"
+    print("=" * 80)
+
+    main(args)
 
 
