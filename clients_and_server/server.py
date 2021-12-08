@@ -1,63 +1,65 @@
+from data_and_model.models import get_model
 import copy
 import torch
+from torch import nn
 from torch.autograd import Variable
 
 
-class server(object):
-    def __init__(self,model,device,dataset,clients_id,server_id):
-        self.model = model.to(device)
+class get_server(object):
+    def __init__(self,model,device,clients,args):
+        # self.model = copy.deepcopy(get_model(dataset=args.dataset).to(device))
+        self.model = copy.deepcopy(model.to(device))
         self.device = device
-        self.clients_id = clients_id      # 这个簇的用户集合
-        self.server_id = server_id        # 这个簇的编号
-        self.acc = []
-        self.test_data = dataset[1]
+        self.clients = clients
+        self.args = args
 
 
-    # 普通的FedAvg用到这个函数，基于聚类的FedAvg用下面的函数
-    def aggregate_model(self):
-        model_states = []
-        for i in self.clients_id:
-            model_states.append(torch.load('./cache/model_state_{}.pt'.format(i)))
+    # 聚合簇模型，并且将簇模型送给每一个用户
+    def get_cluster_model(self,clients_id):
+        client_models = []
+        for i in range(self.args.global_nums):
+            client_model = torch.load('./cache/client_model_{}.pt'.format(i))
+            client_models.append(copy.deepcopy(client_model))
 
-        global_model_state = copy.deepcopy(model_states[0])
+        # 产生k个簇模型
+        self.cluster_models = [copy.deepcopy(self.model.state_dict()) for _ in range(len(clients_id))]
 
-        for key in global_model_state.keys():
-            for i in range(1, len(model_states)):
-                global_model_state[key] += model_states[i][key]
-            global_model_state[key] = torch.div(global_model_state[key], len(model_states))
+        for i,client_id in enumerate(clients_id):
+            # create cluster models
 
-        self.model.load_state_dict(global_model_state)
-        torch.save(self.model.state_dict(), './cache/global_model_{}.pt'.format(self.server_id))
+            # model = copy.deepcopy(self.cluster_models[i].state_dict())
+            for key in self.cluster_models[i].keys():
+                self.cluster_models[i][key] = self.cluster_models[i][key] * 0.0
+                for id in client_id:
+                    self.cluster_models[i][key] += client_models[id][key]
+                self.cluster_models[i][key] = torch.true_divide(self.cluster_models[i][key],len(client_id))
+            torch.save(self.cluster_models[i], './cache/cluster_model_{}.pt'.format(i))
+    
+        # clients get cluster model
+        # for i,client_id in enumerate(clients_id):
+        #     for id in client_id:
+        #         self.clients[id].model.load_state_dict(self.cluster_models[i].state_dict())
+    
+    
+    # 将所有的簇聚合成全局模型，并送给用户
+    def get_global_model(self):
+        # self.global_model = copy.deepcopy(self.model)
+        param = copy.deepcopy(self.model.state_dict())
+
+        # 计算全局模型参数
+        for key in param.keys():
+            param[key] = param[key]*0
+            for model in self.cluster_models:
+                param[key] = param[key] + model[key]
+            param[key] = torch.true_divide(param[key],len(self.cluster_models))
+            # param[key] = param[key]/len(self.cluster_models)
+        torch.save(param, './cache/global_model.pt')
+        # self.global_model.load_state_dict(param)
+
+        # 传全局模型到所有用户
+        # for client in self.clients:
+        #     client.model.load_state_dict(self.global_model.state_dict())
 
 
-    def gain_acc(self):
-        
-        test_correct = 0
-        with torch.no_grad():
-            for data, target in self.test_data:
-                data, target = Variable(data).to(self.device), Variable(target).to(self.device)
-                output = self.model(data)
-                pred = output.argmax(dim=1, keepdim=True)
-                test_correct += pred.eq(target.view_as(pred)).sum().item()
-
-        test_acc = test_correct / len(self.test_data.dataset)
-        #print('[Global model]  test_accuracy: {:.3f}%'.format(test_acc * 100.))
-        return test_acc
-
-
-    # 这个函数用于聚合所有的簇
-    def aggregate_cluster(self):
-        model_states = []
-        for i in self.clients_id:
-            model_states.append(torch.load('./cache/global_model_{}.pt'.format(i)))
-
-        global_model_state = copy.deepcopy(model_states[0])
-
-        for key in global_model_state.keys():
-            for i in range(1, len(model_states)):
-                global_model_state[key] += model_states[i][key]
-            global_model_state[key] = torch.div(global_model_state[key], len(model_states))
-
-        self.model.load_state_dict(global_model_state)
-        torch.save(self.model.state_dict(), './cache/global_model.pt')
-
+    def client_get_model(self,clients_id):
+        pass
