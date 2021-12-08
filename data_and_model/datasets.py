@@ -1,81 +1,86 @@
 import torch
+import time
 import random
-from torch.utils.data import DataLoader
+from torch.serialization import validate_cuda_device
+random.seed(int(time.time())%100000)
+from torch.utils.data import DataLoader, dataset
 from torchvision import datasets
 from torchvision import transforms
 from torch.utils.data import random_split
 import sys
-import time
 import os
 import psutil
 
 
-# 获得数据，默认是MNIST数据集，同时还有CIFAR、EMNIST、FMNIST数据集
-# 对于non-IID数据：每个用户随机获得两个标签
 class download_data(object):
     def __init__(self, args):
         self.args = args
         self.data_name = args.dataset
         self.batch_size = args.batch_size
         self.get_data_way = args.get_data
-        self.__load_dataset()         # 初始化直接调用函数
+        self.data_num = [[] for _ in range(args.k)]         # 用来记录第三种数据，每个用户所在组
+        self.client_num = 0
+        self.__load_dataset()
         self.__initial()
 
+    # initial self.train_dataset and self.test_dataset
+    def __load_dataset(self,path = "/data/wxlou/dataset"):
+        # dataset path
+        if self.data_name == 'MNIST':
+            train_dataset = datasets.MNIST(path,
+                                           train=True,
+                                           download=True,
+                                           transform=transforms.Compose([
+                                               transforms.ToTensor(),
+                                               transforms.Normalize((0.1307,), (0.3081,))
+                                           ]))
 
-    # 产生 self.train_dataset 和 self.test_dataset
-    def __load_dataset(self):
-        if self.data_name =='MNIST':
-            train_dataset = datasets.MNIST('./data/',
-                                              train=True,
-                                              download=True,
-                                              transform=transforms.Compose([
-                                                  transforms.ToTensor(),
-                                                  transforms.Normalize((0.1307,), (0.3081,))
-                                              ]))
-            test_dataset = datasets.MNIST('./data/',
-                                             train=False,
-                                             download=True,
-                                             transform=transforms.Compose([
-                                                 transforms.ToTensor(),
-                                                 transforms.Normalize((0.1307,), (0.3081,))
-                                             ]))
+            test_dataset = datasets.MNIST(path,
+                                          train=False,
+                                          download=True,
+                                          transform=transforms.Compose([
+                                              transforms.ToTensor(),
+                                              transforms.Normalize((0.1307,), (0.3081,))
+                                          ]))
 
         elif self.data_name == 'CIFAR10':
-            train_dataset = datasets.CIFAR10('./data/',
+            train_dataset = datasets.CIFAR10(path,
+                                             train=True,
+                                             download=True,
+                                             transform=transforms.Compose([
+                                                 transforms.RandomCrop(32, 4),
+                                                 transforms.RandomHorizontalFlip(),
+                                                 transforms.ToTensor(),
+                                                 transforms.Normalize((0.4914, 0.4822, 0.4465),
+                                                                      (0.2023, 0.1994, 0.2010))
+                                             ]))
+            test_dataset = datasets.CIFAR10(path,
+                                            train=False,
+                                            download=True,
+                                            transform=transforms.Compose([
+                                                transforms.ToTensor(),
+                                                transforms.Normalize((0.4914, 0.4822, 0.4465),
+                                                                     (0.2023, 0.1994, 0.2010))
+                                            ]))
+
+        elif self.data_name == "FMNIST":
+            train_dataset = datasets.FashionMNIST(path,
                                                   train=True,
                                                   download=True,
                                                   transform=transforms.Compose([
                                                       transforms.ToTensor(),
-                                                      transforms.Normalize((0.4914, 0.4822, 0.4465),
-                                                                           (0.2023, 0.1994, 0.2010))
+                                                      transforms.Normalize((0.1307,), (0.3081,))
                                                   ]))
-            test_dataset = datasets.CIFAR10('./data/',
+            test_dataset = datasets.FashionMNIST(path,
                                                  train=False,
                                                  download=True,
                                                  transform=transforms.Compose([
                                                      transforms.ToTensor(),
-                                                     transforms.Normalize((0.4914, 0.4822, 0.4465),
-                                                                          (0.2023, 0.1994, 0.2010))
+                                                     transforms.Normalize((0.1307,), (0.3081,))
                                                  ]))
 
-        elif self.data_name == "FMNIST":
-            train_dataset = datasets.FashionMNIST('./data/',
-                                              train=True,
-                                              download=True,
-                                              transform=transforms.Compose([
-                                                  transforms.ToTensor(),
-                                                  transforms.Normalize((0.1307,), (0.3081,))
-                                              ]))
-            test_dataset = datasets.FashionMNIST('./data/',
-                                             train=False,
-                                             download=True,
-                                             transform=transforms.Compose([
-                                                 transforms.ToTensor(),
-                                                 transforms.Normalize((0.1307,), (0.3081,))
-                                             ]))
-
         elif self.data_name == 'EMNIST':
-            train_dataset = datasets.EMNIST('./data/',
+            train_dataset = datasets.EMNIST(path,
                                             split="byclass",
                                             train=True,
                                             download=True,
@@ -83,124 +88,245 @@ class download_data(object):
                                                 transforms.ToTensor(),
                                                 transforms.Normalize((0.1307,), (0.3081,))
                                             ]))
-            test_dataset = datasets.EMNIST('./data/',
-                                            split="byclass",
-                                            train=False,
-                                            download=True,
-                                            transform=transforms.Compose([
-                                                transforms.ToTensor(),
-                                                transforms.Normalize((0.1307,), (0.3081,))
-                                            ]))
+            test_dataset = datasets.EMNIST(path,
+                                           split="byclass",
+                                           train=False,
+                                           download=True,
+                                           transform=transforms.Compose([
+                                               transforms.ToTensor(),
+                                               transforms.Normalize((0.1307,), (0.3081,))
+                                           ]))
 
+        elif self.data_name == 'CIFAR100':
+            train_dataset = datasets.CIFAR100(path,
+                                              train = True,
+                                              download = True,
+                                              transform=transforms.Compose([
+                                                    transforms.RandomCrop(32, 4),
+                                                    transforms.RandomHorizontalFlip(),
+                                                    transforms.RandomRotation(15),
+                                                    transforms.ToTensor(),
+                                                    transforms.Normalize(
+                                                      (0.5070751592371323, 0.48654887331495095, 0.4409178433670343),
+                                                      (0.2673342858792401, 0.2564384629170883, 0.27615047132568404))
+                                                ]))
+            test_dataset = datasets.CIFAR100(path,
+                                             train = False,
+                                             download = True,
+                                             transform=transforms.Compose([
+                                                transforms.ToTensor(),
+                                                 transforms.Normalize(
+                                                     (0.5070751592371323, 0.48654887331495095, 0.4409178433670343),
+                                                     (0.2673342858792401, 0.2564384629170883, 0.27615047132568404))
+                                             ]))
         else:
             raise RuntimeError('the name inputed is wrong!')
 
-        self.train_dataset = list(train_dataset)
-        self.test_dataset = list(test_dataset)
-        # self.train_dataset = train_dataset
-        # self.test_dataset = test_dataset
+        # self.train_dataset = list(train_dataset)
+        # self.test_dataset = list(test_dataset)
+        # print(self.train_dataset[0])
+        self.train_dataset = train_dataset
+        self.test_dataset = test_dataset
+        # print(self.train_dataset[0])
+        # sys.exit()
 
     # 初始化
     def __initial(self):
-        if self.get_data_way == "IID":      # 获得IID数据：用户平分数据集
-            num = int(len(self.train_dataset)/self.args.global_nums)
-            train_split = [num for i in range(self.args.global_nums)]
-            train_split.append(len(self.train_dataset)-self.args.global_nums*num)
-            
-            num = int(len(self.test_dataset)/self.args.global_nums)
-            test_split = [num for i in range(self.args.global_nums)]
-            test_split.append(len(self.test_dataset)-self.args.global_nums*num)
+        if self.get_data_way == "IID":  # IID, datasets are divided evenly
+            num = int(len(self.train_dataset) / self.args.global_nums)
+            train_split = [num for _ in range(self.args.global_nums)]
+            train_split.append(len(self.train_dataset) - self.args.global_nums * num)
 
-            train_dataset = random_split(self.train_dataset,train_split)
-            test_dataset = random_split(self.test_dataset,test_split)
+            num = int(len(self.test_dataset) / self.args.global_nums)
+            test_split = [num for i in range(self.args.global_nums)]
+            test_split.append(len(self.test_dataset) - self.args.global_nums * num)
+
+            train_dataset = random_split(self.train_dataset, train_split)
+            test_dataset = random_split(self.test_dataset, test_split)
             train_dataset = [DataLoader(train_dataset[i], batch_size=self.batch_size, shuffle=True,
                                         pin_memory=True) for i in range(self.args.global_nums)]
             test_dataset = [DataLoader(test_dataset[i], batch_size=self.batch_size, shuffle=True,
-                                        pin_memory=True) for i in range(self.args.global_nums)]
-            
-            self.data = list(zip(train_dataset,test_dataset))
-            self.num = -1                # 记录所在位置
-            print(sys.getsizeof(self.train_dataset[0][0]),sys.getsizeof(self.train_dataset[0][1]))
+                                       pin_memory=True) for i in range(self.args.global_nums)]
 
-        elif self.get_data_way == "nonIID":
+            self.train_dataset = iter(train_dataset)
+            self.test_dataset = iter(test_dataset)
+
+        elif self.get_data_way == "nonIID":         # two classes per client
+            self.ranked = []
             if self.data_name == 'EMNIST':
-                self.index_train = [[] for i in range(0,62)]
-                self.index_test = [[] for i in range(0,62)]
-            else:
-                self.index_train = [[] for i in range(0,10)]
-                self.index_test = [[] for i in range(0,10)]
+                self.index_train = [[] for i in range(0, 62)]
+                self.index_test = [[] for i in range(0, 62)]
 
-            for i, data in enumerate(self.train_dataset):
-                self.index_train[data[1]].append(i)           # 按照标签分类
+            elif self.data_name == 'CIFAR100':
+                self.index_train = [[] for i in range(0, 100)]
+                self.index_test = [[] for i in range(0, 100)]
+
+            else:
+                self.index_train = [[] for i in range(0, 10)]
+                self.index_test = [[] for i in range(0, 10)]
+
+            for i, data in enumerate(self.train_dataset):       # sort by label
+                self.index_train[data[1]].append(i)
             for i, data in enumerate(self.test_dataset):
-                self.index_test[data[1]].append(i)           # 按照标签分类
+                self.index_test[data[1]].append(i)
 
-            self.indexes = []
+            # self.indexes = []
 
         else:
-            self.index_train = [[],[],[]]       # 将数据集分成3个不相交的集合
-            self.index_test = [[],[],[]]
-
-            if self.data_name == 'EMNIST':
-                for i, data in enumerate(self.train_dataset):
-                    if data[1] < 10:
-                        self.index_train[0].append(i)
-                    elif data[1] > 35:
-                        self.index_train[2].append(i)
-                    else:
-                        self.index_train[1].append(i)
-                for i, data in enumerate(self.test_dataset):
-                    if data[1] < 10:
-                        self.index_test[0].append(i)
-                    elif data[1] > 35:
-                        self.index_test[2].append(i)
-                    else:
-                        self.index_test[1].append(i)
+            if self.args.k == 3:
+                self.index_train = [[], [], []]     # divide the datasets into three disjoint sets
+                self.index_test = [[], [], []]
+                if self.data_name == 'EMNIST':
+                    for i, data in enumerate(self.train_dataset):
+                        if data[1] < 10:
+                            self.index_train[0].append(i)
+                        elif data[1] > 35:
+                            self.index_train[2].append(i)
+                        else:
+                            self.index_train[1].append(i)
+                    for i, data in enumerate(self.test_dataset):
+                        if data[1] < 10:
+                            self.index_test[0].append(i)
+                        elif data[1] > 35:
+                            self.index_test[2].append(i)
+                        else:
+                            self.index_test[1].append(i)
+                elif self.data_name == 'CIFAR100':
+                    for i, data in enumerate(self.train_dataset):
+                        if data[1] < 33:
+                            self.index_train[0].append(i)
+                        elif data[1] > 66:
+                            self.index_train[2].append(i)
+                        else:
+                            self.index_train[1].append(i)
+                    for i, data in enumerate(self.test_dataset):
+                        if data[1] < 33:
+                            self.index_test[0].append(i)
+                        elif data[1] > 66:
+                            self.index_test[2].append(i)
+                        else:
+                            self.index_test[1].append(i)
+                else:
+                    for i, data in enumerate(self.train_dataset):
+                        if data[1] < 3:
+                            self.index_train[0].append(i)
+                        elif data[1] > 5:
+                            self.index_train[2].append(i)
+                        else:
+                            self.index_train[1].append(i)
+                    for i, data in enumerate(self.test_dataset):
+                        if data[1] < 3:
+                            self.index_test[0].append(i)
+                        elif data[1] > 5:
+                            self.index_test[2].append(i)
+                        else:
+                            self.index_test[1].append(i)
 
             else:
-                for i, data in enumerate(self.train_dataset):
-                    if data[1] < 3:
-                        self.index_train[0].append(i)
-                    elif data[1] > 5:
-                        self.index_train[2].append(i)
-                    else:
-                        self.index_train[1].append(i)
-                for i, data in enumerate(self.test_dataset):
-                    if data[1] < 3:
-                        self.index_test[0].append(i)
-                    elif data[1] > 5:
-                        self.index_test[2].append(i)
-                    else:
-                        self.index_test[1].append(i)
+                self.index_train = [[], [], [], [], []]  # divide the datasets into five disjoint sets
+                self.index_test = [[], [], [], [], []]
+                if self.data_name == 'EMNIST':
+                    for i, data in enumerate(self.train_dataset):
+                        if data[1] < 12:
+                            self.index_train[0].append(i)
+                        elif data[1] < 24:
+                            self.index_train[1].append(i)
+                        elif data[1] < 36:
+                            self.index_train[2].append(i)
+                        elif data[1] < 48:
+                            self.index_train[3].append(i)
+                        else:
+                            self.index_train[4].append(i)
+                    for i, data in enumerate(self.test_dataset):
+                        if data[1] < 12:
+                            self.index_test[0].append(i)
+                        elif data[1] < 24:
+                            self.index_test[1].append(i)
+                        elif data[1] < 36:
+                            self.index_test[2].append(i)
+                        elif data[1] < 48:
+                            self.index_test[3].append(i)
+                        else:
+                            self.index_test[4].append(i)
+                elif self.data_name == 'CIFAR100':
+                    for i, data in enumerate(self.train_dataset):
+                        if data[1] < 20:
+                            self.index_train[0].append(i)
+                        elif data[1] < 40:
+                            self.index_train[1].append(i)
+                        elif data[1] < 60:
+                            self.index_train[2].append(i)
+                        elif data[1] < 80:
+                            self.index_train[3].append(i)
+                        else:
+                            self.index_train[4].append(i)
+                    for i, data in enumerate(self.test_dataset):
+                        if data[1] < 20:
+                            self.index_test[0].append(i)
+                        elif data[1] < 40:
+                            self.index_test[1].append(i)
+                        elif data[1] < 60:
+                            self.index_test[2].append(i)
+                        elif data[1] < 80:
+                            self.index_test[3].append(i)
+                        else:
+                            self.index_test[4].append(i)
+                else:
+                    for i, data in enumerate(self.train_dataset):
+                        if data[1] < 2:
+                            self.index_train[0].append(i)
+                        elif data[1] < 4:
+                            self.index_train[1].append(i)
+                        elif data[1] < 6:
+                            self.index_train[2].append(i)
+                        elif data[1] < 8:
+                            self.index_train[3].append(i)
+                        else:
+                            self.index_train[4].append(i)
+                    for i, data in enumerate(self.test_dataset):
+                        if data[1] < 2:
+                            self.index_test[0].append(i)
+                        elif data[1] < 4:
+                            self.index_test[1].append(i)
+                        elif data[1] < 6:
+                            self.index_test[2].append(i)
+                        elif data[1] < 8:
+                            self.index_test[3].append(i)
+                        else:
+                            self.index_test[4].append(i)
 
-    # 获得IID数据，用户平分数据集
-    # 每个用户具有相同的样本数量，相同的标签
-    def get_IID_data(self):   # 设置训练样本比例
 
-        self.num = self.num + 1
-        return self.data[self.num]
+    # get IID datasets
+    def get_IID_data(self):
+        print("get_IID_data")
+
+        # train_sample = random.sample(range(len(self.train_dataset)),train_num)
+        # train_data = torch.utils.data.Subset(self.train_dataset,train_sample)
+        # train_dataset = DataLoader(train_data,batch_size=self.batch_size, shuffle=True)
+        #
+        # test_sample = random.sample(range(len(self.test_dataset)),test_num)
+        # test_data = torch.utils.data.Subset(self.test_dataset,test_sample)
+        # test_dataset= DataLoader(test_data,batch_size=self.batch_size, shuffle=True)
+
+        train_data = next(self.train_dataset)
+        test_data = next(self.test_dataset)
+        data = []
+        data.append(train_data)
+        data.append(test_data)
+        return data
 
 
-    # 获得non-IID数据，每个用户仅仅包含两个标签,需要考虑三种数据集的不同
-    # 一个是0-10，另一个是10个字符串，还有一个是62个标签
     def get_nonIID_data(self):
-        if self.data_name == "EMNIST":
-            num = 62
-        else:
-            num = 10
-        rank = random.sample(range(0,num),2)
-        indexes = [i for i in range(num) if i not in self.indexes]      # 不存在标签
-        if len(indexes) != 0:
-            if rank[0] not in indexes:
-                rank[1] = indexes[0]
-        print(rank)
+        print("get_nonIID_data")
 
-        for i in rank:
-            if i not in self.indexes:
-                self.indexes.append(i)
-        self.indexes.sort()
-        print(self.indexes)
-        time.sleep(2)
+        if self.args.dataset == "EMNSIT":
+            rank = random.sample(range(62),2)
+        elif self.args.dataset == "CIFAR100":
+            rank = random.sample(range(100), 2)
+        else:
+            rank = random.sample(range(10),2)
+
+        print(rank)
 
         train_index = []
         test_index = []
@@ -208,11 +334,14 @@ class download_data(object):
             train_index.extend(self.index_train[i])
             test_index.extend(self.index_test[i])
 
-        sample_train = random.sample(train_index,int(len(train_index)*0.5))
-        sample_test = random.sample(test_index,int(len(test_index)*0.5))
+        # 下面的代码表示抽样
+        # train_index = random.sample(train_index, int(len(train_index) * rata))
+        # test_index = random.sample(test_index, int(len(test_index) * rata))
+        sample_train = train_index
+        sample_test = test_index
 
-        dataset1 = torch.utils.data.Subset(self.train_dataset, sample_train)    # 获取指定元素的数据集
-        dataset2 = torch.utils.data.Subset(self.test_dataset, sample_test)    # 获取指定元素的数据集
+        dataset1 = torch.utils.data.Subset(self.train_dataset, sample_train)
+        dataset2 = torch.utils.data.Subset(self.test_dataset, sample_test)
         train_dataset = DataLoader(dataset1, batch_size=self.batch_size, shuffle=True)
         test_dataset = DataLoader(dataset2, batch_size=self.batch_size, shuffle=True)
 
@@ -224,53 +353,79 @@ class download_data(object):
 
     # 获得practical_nonIID_data，这个更加符合实际
     # 将所有的数据分为三个组，每个组内的数据不完全一样。
-    # 每个组具有90%的主要数据，10%的其他数据
-    # data_num表示选用那个数据集作为主要数据
-    def get_practical_nonIID_data(self,data_num=0):
-        print(data_num)
-        train_data_num = random.randint(5000,20000)      # 训练集大小
-        sampling_train = random.sample(self.index_train[data_num],train_data_num)
-        other1 = []
-        for i in range(3):
-            if i != data_num:
-                other1.extend(self.index_train[i])
-        other1 = random.sample(other1,int(train_data_num*0.1))
-        sampling_train.extend(other1)
+    # 每个组具有80%的主要数据，20%的其他数据
+    def get_practical_nonIID_data(self,id=None):
+        print("get_practical_nonIID_data")
+        # id表示更新时用户的编号，id=None时用来记录最初随机分配
+        if id == None:
+            n = 3
+        else:
+            n = 5
 
-        dataset = torch.utils.data.Subset(self.train_dataset, sampling_train)
-        train_dataset = DataLoader(dataset, batch_size=self.batch_size, shuffle=True)
+        data_index = random.randint(0,n-1)        # Gets the specified index dataset
+        self.update_data(id=id,data=data_index)   # update
 
+        print(data_index)
+        if self.data_name == "EMNIST":
+            train_data_num = 10000          # train_dataset_num
+        else:
+            train_data_num = 2000
 
-        test_data_num = int(train_data_num*0.2)      # 测试集大小
-        sampling_test = random.sample(self.index_test[data_num],test_data_num)
-        other1 = []
-        for i in range(3):
-            if i != data_num:
-                other1.extend(self.index_test[i])
-        other1 = random.sample(other1,int(test_data_num*0.1))
-        sampling_test.extend(other1)
+        test_data_num = int(train_data_num * 0.2)       # 测试集大小
 
+        sampling_train = random.sample(self.index_train[data_index], int(train_data_num*0.8))    # Obtain major component train_data
+        other_train = []
+        for i in range(n):
+            if i != data_index:
+                other_train.extend(self.index_train[i])
+        other_train = random.sample(other_train, int(train_data_num * 0.2))             # Obtain non-major component train_data
+        sampling_train.extend(other_train)
+        train_dataset = torch.utils.data.Subset(self.train_dataset, sampling_train)
+        train_dataset = DataLoader(train_dataset, batch_size=self.batch_size, shuffle=True)
+
+        sampling_test = random.sample(self.index_test[data_index], int(test_data_num*0.8))
+        other_test = []
+        for i in range(n):
+            if i != data_index:
+                other_test.extend(self.index_test[i])
+        other_test = random.sample(other_test, int(test_data_num * 0.2))
+        sampling_test.extend(other_test)
         test_dataset = torch.utils.data.Subset(self.test_dataset, sampling_test)
         test_dataset = DataLoader(test_dataset, batch_size=self.batch_size, shuffle=True)
-        
+
         data = []
         data.append(train_dataset)
         data.append(test_dataset)
         return data
 
+    # update
+    def update_data(self,id=None,data=None):
+        if data == None:
+            print("数据产生错误...")
+            sys.exit()
+        
+        if id == None:      # 表示初始化数据
+            self.data_num[data].append(self.client_num)
+            self.client_num += 1
+        else:
+            for data_index in self.data_num:    # 删除之前id已经存在位置
+                if id in data_index:
+                    data_index.remove(id)
+            self.data_num[data].append(id)   # 添加新成员并排序
+            self.data_num[data].sort()
+        for data_index in self.data_num:print(data_index)   # 用来查看
+            
 
-    # 第一种方式：IID；第二种获得数据的方式：每个用户随机获得2个标签，成为nonIID；
-    # 第三种获得数据的方式，将数据划分为三组，每一组的用户数据相似，组之间数据相似小
-    def get_data(self,data_num=0,get_data="train"):
-        if get_data == "test":      # 如果仅仅得到测试数据，这样获得
-            data = DataLoader(self.test_dataset,batch_size=self.batch_size,shuffle=True)
+    def get_data(self, get_data_way="train",id = None):
+        if get_data_way == "test":
+            data = DataLoader(self.test_dataset, batch_size=self.batch_size, shuffle=True)
             return data
 
         if self.get_data_way == "IID":
             data = self.get_IID_data()
         elif self.get_data_way == "nonIID":
             data = self.get_nonIID_data()
-        else:  # 划分三组，每一组内的数据相似，组间不相似
-            data = self.get_practical_nonIID_data(data_num)
+        else:
+            data = self.get_practical_nonIID_data(id)
 
         return data
