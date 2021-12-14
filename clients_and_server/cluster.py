@@ -11,8 +11,8 @@ import sys
 
 def K_means_cluster(n_clients,k_means):
     clients = load_clients(n_clients=n_clients)
-    a = torch.transpose(torch.tensor(clients),0,1)      # 矩阵转置
-    u,s,v = torch.svd_lowrank(a,q=50)            # 主成分分析，使用奇异值分解
+    a = torch.transpose(torch.tensor(clients),0,1)     
+    u,s,v = torch.svd_lowrank(a,q=50) 
     
     print(u.shape)
     print(s.shape)
@@ -23,19 +23,19 @@ def K_means_cluster(n_clients,k_means):
     plt.show()
 
 
-    initial = random.sample(range(0, n_clients), k_means)  # 随机抽取k个中心
+    initial = random.sample(range(0, n_clients), k_means)  
     init_model = [clients[i] for i in initial]
-    indexes2 = [[] for i in range(k_means)]  # 保存一个副本
+    indexes2 = [[] for i in range(k_means)] 
     print("init_model:",initial)
     print("shape:",np.array(clients).shape)
     num = 1
 
     while True:
-        clusters = [[] for i in range(k_means)]    # 存放簇
-        indexes = [[] for i in range(k_means)]      # 存放用户id
+        clusters = [[] for i in range(k_means)]   
+        indexes = [[] for i in range(k_means)]      
 
         for i in range(n_clients):
-            # 计算这个用户与所有簇的距离，选择一个最小的距离
+      
             distance = []
             for j in range(k_means):
                 a = np.sqrt(np.sum(np.square(np.array(clients[i])-np.array(init_model[j]))))
@@ -44,7 +44,7 @@ def K_means_cluster(n_clients,k_means):
             clusters[id].append(clients[i])
             indexes[id].append(i)
 
-        # 计算每个簇的均值
+
         print(np.array(clusters).shape)
         for i in range(k_means):
             print(i)
@@ -55,7 +55,6 @@ def K_means_cluster(n_clients,k_means):
             init_model[i] = a.tolist()
 
         print(num, indexes, indexes2,'\n')
-        # 判断返回的条件，如果100轮循环还没有返回，退出
         if (np.array(indexes).shape == np.array(indexes2).shape) and (np.array(indexes) == np.array(indexes2)).all():
             if num % 100 == 0:
                 print("无法收敛，返回")
@@ -70,7 +69,7 @@ def K_means_cluster(n_clients,k_means):
 
 def Kmeans(n_clients):
     clients = load_clients(n_clients=n_clients)
-    u,s,v = torch.svd_lowrank(torch.tensor(clients),q=100)            # 主成分分析，使用奇异值分解
+    u,s,v = torch.svd_lowrank(torch.tensor(clients),q=100)            
     
     print(u.shape)
     print(s)
@@ -80,10 +79,10 @@ def Kmeans(n_clients):
     plt.savefig("a.jpg")
     plt.show()
 
-    for k in range(len(s)):             # 选取主成分的90%的前k项
+    for k in range(len(s)):             
         if torch.sum(s[0:k])/torch.sum(s) >= 0.9:
             break
-    print(k)               # 打印簇个数
+    print(k)               
 
     result = KMeans(k,max_iter=100).fit(clients).labels_    # kmeans++
     print(result)
@@ -93,75 +92,42 @@ def Kmeans(n_clients):
 
     return cluster
 
-def Hierarchical_clustering(n_clients,k_means):
-    clients = load_clients(n_clients=n_clients)
-
-    C = []
-    for j in range(n_clients):
-        C.append([[j],[clients[j]]])
-
-    while len(C)>k_means:
-        # 找出距离最近的两个聚类簇，合并
-        M = [[0 for i in range(len(C))] for i in range(len(C))]
-        for i in range(len(C)):
-            for j in range(i+1,len(C)):
-                pass
-                M[i][j] = 0
-                M[j][i] = M[i][j]
-
-        min_x = 0
-        min_y = 1
-        min_dis = M[min_x][min_y]
-        for i in range(len(C)):
-            for j in range(i+1,len(C)):
-                if min_dis < M[i][j]:
-                    min_x = i
-                    min_y = j
-                    min_dis = M[min_x][min_y]
-
-        # 合并距离最小的两个簇,删除另一个簇
-        C[min_x][0].extend(C[min_y][0])
-        C[min_x][1].extend(C[min_y][1])
-        del C[min_y]
-
-    indexes = [C[i][0] for i in range(k_means)]
-    return indexes
 
 def Kmeans_plusplus(n_clients,device,epoch):
     clients = load_clients(n_clients=n_clients)
     clients = torch.tensor(clients).to(device)
 
-    distance = Distance_matrix(n_clients, clients)      # 计算距离矩阵
+    distance = Distance_matrix(n_clients, clients)      
     clients = torch.tensor(distance)
 
     k = SVD_Dis(n_clients, clients, epoch)
 
-    initial_model = [clients[0]]      # 初始化第一个簇
+    initial_model = [clients[0]]     
     # print(initial_model[0])
     while len(initial_model) < k:
-        distances = []              # 保存最小距离
+        distances = []              
         for c in clients:
-            min_dis = 100000        # 初始化一个最小距离
+            min_dis = 100000       
             for i in initial_model:
                 dis = torch.norm(i-c,p=2,dim=0).item()
                 if dis < min_dis:
-                    min_dis = dis   # 更新最小距离      
+                    min_dis = dis  
             distances.append(min_dis)
         # print(distances)
         max_index = distances.index(max(distances))  
-        distances[max_index] = 0        # 找到最大值的索引并置为0，防止噪声的问题
+        distances[max_index] = 0       
 
         max_index = distances.index(max(distances))  
         initial_model.append(clients[max_index])
 
     num = 1
-    indexes2 = [[] for i in range(k)]  # 保存一个副本
+    indexes2 = [[] for i in range(k)]  
     while True:
-        clusters = [[] for _ in range(k)]    # 存放簇
-        indexes = [[] for _ in range(k)]      # 存放用户id
+        clusters = [[] for _ in range(k)]    
+        indexes = [[] for _ in range(k)]     
 
         for i in range(n_clients):
-            # 计算这个用户与所有簇的距离，选择一个最小的距离
+            
             distance = []
             for j in range(k):
                 # a = np.sqrt(np.sum(np.square(np.array(clients[i])-np.array(initial_model[j]))))
@@ -171,16 +137,14 @@ def Kmeans_plusplus(n_clients,device,epoch):
             clusters[id].append(clients[i])
             indexes[id].append(i)
 
-        # 计算每个簇的均值
+        
         for i in range(k):
             a = clusters[i][0]*0.0
             for j in clusters[i]:
                 a += j
             a = torch.div(a,len(clusters[i]))
             initial_model[i] = a
-
-        # print(num, indexes, indexes2,'\n')
-        # 判断返回的条件，如果100轮循环还没有返回，退出
+            
         if (np.array(indexes).shape == np.array(indexes2).shape) and (np.array(indexes) == np.array(indexes2)).all():
             if num % 100 == 0:
                 print("无法收敛，返回")
@@ -192,46 +156,40 @@ def Kmeans_plusplus(n_clients,device,epoch):
 
     return indexes
 
-# 首先加载模型，根据加载的模型，提取参数
+# load model and get para
 def load_clients(n_clients):
-    model_states = [[] for i in range(n_clients)]      # 存放n_clients个模型参数
+    model_states = [[] for i in range(n_clients)]      
     for i in range(n_clients):
-        grad_model = torch.load('./cache/grad_model_{}.pt'.format(i))       # 获得梯度模型
-        # init_para = torch.nn.utils.parameters_to_vector(grad_model.parameters())
-        key = ["fc1.weight","fc1.bias","fc2.weight","fc2.bias"
-                ,"hidden1.weight","hidden1.bias","hidden2.weight","hidden1.bias","out.weight","out.bias"
-                ,"out.weight","out.bias"
-                ,"linear.weight","linear.bias"]
-        # if i == 0:
-        #     print(grad_model.keys())
+        grad_model = torch.load('./cache/grad_model_{}.pt'.format(i))       
+        
         for name in grad_model.keys():
-            # if name not in key:
-            #     continue
             a = grad_model[name].view(-1).tolist()
             model_states[i].extend(a)
             
     return model_states
 
+# compute distance matrix
 def Distance_matrix(n_clients,clients):
-    distance = []  # 计算距离矩阵
+    distance = []  
     for i in range(n_clients):
         dis = []
         for j in range(n_clients):
-            d = torch.norm(torch.tensor(clients[i]) - torch.tensor(clients[j]), p=2, dim=0).item()  # 计算两个模型之间的欧氏距离
+            d = torch.norm(torch.tensor(clients[i]) - torch.tensor(clients[j]), p=2, dim=0).item()  
             if i == j:
                 d = 1000
             dis.append(d)
         dis[i] = min(dis)
         for c in range(n_clients):
-            dis[c] = (max(dis) - dis[c]) / (max(dis) - min(dis))  # 归一化到0-1
+            dis[c] = (max(dis) - dis[c]) / (max(dis) - min(dis))  
         distance.append(dis)
     return distance
 
+
+# get cluster number by using SVD
 def SVD_Dis(n_clients,clients,epoch):
 
-
-    a = torch.transpose(torch.tensor(clients), 0, 1)  # 矩阵转置
-    u, s, v = torch.svd_lowrank(a, q=n_clients)  # 主成分分析，使用奇异值分解
+    a = torch.transpose(torch.tensor(clients), 0, 1)  
+    u, s, v = torch.svd_lowrank(a, q=n_clients)  
 
     print(u.shape)
     print(s)
@@ -240,10 +198,10 @@ def SVD_Dis(n_clients,clients,epoch):
     plt.savefig("./result/picture/a_{}.jpg".format(epoch))
     plt.show()
     k = 0
-    for k in range(len(s)):  # 选取主成分的90%的前k项
+    for k in range(len(s)):  
         if torch.sum(s[0:k]) / torch.sum(s) >= 0.8:
             break
-    print(k)  # 打印簇个数
+    print(k)  
 
     return k
 
