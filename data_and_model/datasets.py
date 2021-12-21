@@ -22,6 +22,7 @@ class download_data(object):
         self.client_num = 0
         self.__load_dataset()
         self.__initial()
+        self.index = 0
 
     # initial self.train_dataset and self.test_dataset
     def __load_dataset(self,path = "/data/wxlou/dataset"):
@@ -355,7 +356,7 @@ class download_data(object):
     # 将所有的数据分为三个组，每个组内的数据不完全一样。
     # 每个组具有80%的主要数据，20%的其他数据
     def get_practical_nonIID_data(self,id=None):
-        print("get_practical_nonIID_data")
+        # print("get_practical_nonIID_data")
         # id表示更新时用户的编号，id=None时用来记录最初随机分配
         if id == None:
             n = 3
@@ -363,7 +364,9 @@ class download_data(object):
             n = 5
 
         data_index = random.randint(0,n-1)        # Gets the specified index dataset
-        self.update_data(id=id,data=data_index)   # update
+        data_index = self.index % 5
+        self.index = self.index + 1
+        # self.update_data(id=id,data=data_index)   # update
 
         print(data_index)
         if self.data_name == "EMNIST":
