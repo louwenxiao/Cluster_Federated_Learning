@@ -1,6 +1,6 @@
 from data_and_model.models import get_model         # 调用自己定义的模块
 from data_and_model.datasets import download_data
-from data_and_model.parameter import param
+# from data_and_model.parameter import param
 from clients_and_server.server import get_server
 from clients_and_server.clients import get_client
 from clients_and_server.cluster import Kmeans, Kmeans_plusplus
